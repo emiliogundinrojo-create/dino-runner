@@ -886,7 +886,7 @@ class DinoRunner:
         cx = self.game_width / 2 - 130
         self.button(cx, self.game_height / 2 - 20, 260, 62, "Jugar", "play", "#22c55e")
         self.button(cx, self.game_height / 2 + 60, 260, 62, "Tienda", "open_shop", "#f59e0b")
-        self.button(cx, self.game_height / 2 + 140, 260, 62, "Sking", "open_skins", "#60a5fa")
+        self.button(cx, self.game_height / 2 + 140, 260, 62, "Skins", "open_skins", "#60a5fa")
         self.button(cx, self.game_height / 2 + 220, 260, 62, "Salir", "exit", "#ef4444")
 
     def draw_shop(self) -> None:
@@ -970,7 +970,7 @@ class DinoRunner:
 
     def draw_skins_menu(self) -> None:
         self.canvas.create_rectangle(0, 0, self.game_width, self.game_height, fill="#0b1120", width=0)
-        self.canvas.create_text(self.game_width / 2, 70, text="Skings", fill="#e2e8f0", font=("Segoe UI", 40, "bold"))
+        self.canvas.create_text(self.game_width / 2, 70, text="Skins", fill="#e2e8f0", font=("Segoe UI", 40, "bold"))
         self.canvas.create_text(self.game_width / 2, 108, text="Aquí puedes equipar sin entrar a la tienda", fill="#93c5fd", font=("Segoe UI", 16, "bold"))
 
         keys = ["default", "verdoso", "infernal", "cr7", "messi", "neymar"]
