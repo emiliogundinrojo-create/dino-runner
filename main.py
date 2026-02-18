@@ -2,9 +2,15 @@ import json
 import os
 import random
 import smtplib
+import time
 import tkinter as tk
 from email.message import EmailMessage
 from pathlib import Path
+
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE_PATH = os.path.join(ROOT_DIR, "accounts_data.json")
+ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
+CACTUS_ASSETS_DIR = os.path.join(ASSETS_DIR, "cactus")
 
 BASE_WIDTH = 1280
 BASE_HEIGHT = 720
@@ -34,6 +40,14 @@ class DinoRunner:
         self.score_var = tk.StringVar(value="Puntaje: 0")
         self.best_var = tk.StringVar(value="Récord: 0")
         self.emilianos_var = tk.StringVar(value="Emilianos: 0")
+
+        self.best_score = 0
+        self.emilianos = 0
+        self.running = True
+        self.game_width = BASE_WIDTH - 32
+        self.game_height = BASE_HEIGHT - 120
+        self.ground_y = self.game_height - 170
+        self.cactus_images = self.load_cactus_images()
 
         hud = tk.Frame(root, bg="#0f172a")
         hud.pack(fill="x", padx=16, pady=(14, 6))
@@ -69,6 +83,8 @@ class DinoRunner:
         self.login_status_var = tk.StringVar(value="")
         self.recover_email_var = tk.StringVar()
         self.recover_code_var = tk.StringVar()
+        self.recover_new_pass_var = tk.StringVar()
+        self.recover_confirm_pass_var = tk.StringVar()
         self.recover_status_var = tk.StringVar(value="")
         self.register_user_var = tk.StringVar()
         self.register_email_var = tk.StringVar()
@@ -76,23 +92,17 @@ class DinoRunner:
         self.register_confirm_var = tk.StringVar()
         self.register_status_var = tk.StringVar(value="")
         self.recovery_code = ""
+        self.recovery_verified_email = ""
         self.login_entry = tk.Entry(root, textvariable=self.login_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a")
         self.password_entry = tk.Entry(root, textvariable=self.password_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a", show="•")
         self.recover_email_entry = tk.Entry(root, textvariable=self.recover_email_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a")
         self.recover_code_entry = tk.Entry(root, textvariable=self.recover_code_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a")
+        self.recover_new_pass_entry = tk.Entry(root, textvariable=self.recover_new_pass_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a", show="•")
+        self.recover_confirm_pass_entry = tk.Entry(root, textvariable=self.recover_confirm_pass_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a", show="•")
         self.register_user_entry = tk.Entry(root, textvariable=self.register_user_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a")
         self.register_email_entry = tk.Entry(root, textvariable=self.register_email_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a")
         self.register_pass_entry = tk.Entry(root, textvariable=self.register_pass_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a", show="•")
         self.register_confirm_entry = tk.Entry(root, textvariable=self.register_confirm_var, font=("Segoe UI", 18, "bold"), justify="center", bg="#e2e8f0", fg="#0f172a", show="•")
-
-        self.cactus_images = self.load_cactus_images()
-
-        self.best_score = 0
-        self.emilianos = 0
-        self.running = True
-        self.game_width = BASE_WIDTH - 32
-        self.game_height = BASE_HEIGHT - 120
-        self.ground_y = self.game_height - 170
 
         self.skins = {
             "default": {
@@ -109,34 +119,6 @@ class DinoRunner:
                 "base": "#ef4444",
                 "dark": "#7f1d1d",
             },
-            "verdoso": {
-                "name": "Verdoso",
-                "cost": 20,
-                "owned": False,
-                "base": "#22c55e",
-                "dark": "#166534",
-            },
-            "cr7": {
-                "name": "Cristiano Ronaldo",
-                "cost": 100,
-                "owned": False,
-                "base": "#e5e7eb",
-                "dark": "#111827",
-            },
-            "messi": {
-                "name": "Messi",
-                "cost": 100,
-                "owned": False,
-                "base": "#60a5fa",
-                "dark": "#1e3a8a",
-            },
-            "neymar": {
-                "name": "Neymar Junior",
-                "cost": 100,
-                "owned": False,
-                "base": "#facc15",
-                "dark": "#166534",
-            },
         }
         self.equipped_skin = "default"
 
@@ -145,10 +127,6 @@ class DinoRunner:
 
         self.reset_run(reset_record=True)
 
-        self.root.bind("<space>", self.on_jump)
-        self.root.bind("<Up>", self.on_jump)
-        self.root.bind("<Down>", self.on_crouch_press)
-        self.root.bind("<KeyRelease-Down>", self.on_crouch_release)
         self.root.bind("r", self.on_restart_request)
         self.root.bind("R", self.on_restart_request)
         self.canvas.bind("<Button-1>", self.on_canvas_click)
@@ -176,20 +154,45 @@ class DinoRunner:
     def save_current_account(self) -> None:
         if not self.current_user:
             return
+        current_info = self.accounts.get(self.current_user, {})
+        if not isinstance(current_info, dict):
+            current_info = {}
         owned = [key for key, skin in self.skins.items() if bool(skin["owned"])]
-        self.accounts[self.current_user] = {
+        # Conserva credenciales/correo ya guardados para no romper login ni recuperación.
+        updated_info = {
+            "password": str(current_info.get("password", "")),
+            "email": str(current_info.get("email", "")),
             "emilianos": int(self.emilianos),
             "best_score": int(self.best_score),
             "equipped_skin": self.equipped_skin,
             "owned_skins": owned,
         }
+        self.accounts[self.current_user] = updated_info
         self.save_accounts()
+
+    def is_valid_email(self, value: str) -> bool:
+        email = value.strip()
+        return "@" in email and "." in email
+
+    def find_account_by_email(self, email: str) -> str:
+        normalized = email.strip().lower()
+        if not normalized:
+            return ""
+        return next(
+            (
+                username
+                for username, info in self.accounts.items()
+                if isinstance(info, dict) and str(info.get("email", "")).strip().lower() == normalized
+            ),
+            "",
+        )
 
     def apply_account(self, username: str, password: str) -> bool:
         info = self.accounts.get(username)
         if not isinstance(info, dict):
             info = {
                 "password": password,
+                "email": "",
                 "emilianos": 0,
                 "best_score": 0,
                 "equipped_skin": "default",
@@ -216,7 +219,11 @@ class DinoRunner:
         self.save_current_account()
         return True
 
-    def send_recovery_email(self, recipient: str, code: str) -> tuple[bool, str]:
+    def generate_recovery_code(self, length: int = 6) -> str:
+        digits = "0123456789"
+        return "".join(random.choice(digits) for _ in range(max(1, int(length))))
+
+    def send_recovery_code(self, recipient: str, code: str) -> tuple[bool, str]:
         host = os.getenv("SMTP_HOST", "")
         port = int(os.getenv("SMTP_PORT", "587"))
         user = os.getenv("SMTP_USER", "")
@@ -241,11 +248,15 @@ class DinoRunner:
         except Exception:
             return False, "No se pudo enviar el correo. Revisa la configuración SMTP."
 
+    def send_recovery_email(self, recipient: str, code: str) -> tuple[bool, str]:
+        # Compatibilidad con llamadas existentes.
+        return self.send_recovery_code(recipient, code)
+
     def on_enter_key(self, _event=None) -> None:
         if self.screen == "login":
             self.handle_action("login")
         elif self.screen == "recover_password":
-            self.handle_action("verify_recovery")
+            self.handle_action("reset_password")
         elif self.screen == "register_account":
             self.handle_action("register")
 
@@ -264,8 +275,8 @@ class DinoRunner:
                 obs["y"] = self.ground_y - float(obs["h"])
 
     def load_cactus_images(self) -> list[tk.PhotoImage]:
-        assets_dir = Path(__file__).parent / "assets" / "cactus"
-        if not assets_dir.exists():
+        assets_dir = Path(CACTUS_ASSETS_DIR)
+        if not assets_dir.is_dir():
             return []
 
         images: list[tk.PhotoImage] = []
@@ -291,6 +302,12 @@ class DinoRunner:
         self.crouching = False
 
         self.speed = 8.0
+        if not hasattr(self, "_movement_binds_ready"):
+            self.root.bind("<space>", self.on_jump, add="+")
+            self.root.bind("<Up>", self.on_jump, add="+")
+            self.root.bind("<Down>", self.on_crouch_press, add="+")
+            self.root.bind("<KeyRelease-Down>", self.on_crouch_release, add="+")
+            self._movement_binds_ready = True
         self.score = 0
         self.score_elapsed_ms = 0
         self.spawn_timer = random.randint(SPAWN_MIN, SPAWN_MAX)
@@ -328,7 +345,7 @@ class DinoRunner:
         self.emilianos_var.set(f"Emilianos: {self.emilianos}")
 
     def on_crouch_press(self, _event=None) -> None:
-        if self.screen != "playing" or not self.running or not self.grounded:
+        if self.screen != "playing" or not self.running:
             return
         if not self.crouching:
             self.crouching = True
@@ -356,7 +373,7 @@ class DinoRunner:
                 self.handle_action(action)
                 return
 
-        if self.screen == "playing":
+        if self.screen == "playing" and self.running:
             self.on_jump()
 
     def handle_action(self, action: str) -> None:
@@ -377,7 +394,10 @@ class DinoRunner:
             self.recover_status_var.set("")
             self.recover_email_var.set("")
             self.recover_code_var.set("")
+            self.recover_new_pass_var.set("")
+            self.recover_confirm_pass_var.set("")
             self.recovery_code = ""
+            self.recovery_verified_email = ""
             self.screen = "recover_password"
             return
         if action == "open_register":
@@ -396,7 +416,7 @@ class DinoRunner:
             if not user or not email or not pwd or not confirm:
                 self.register_status_var.set("Completa todos los campos")
                 return
-            if "@" not in email or "." not in email:
+            if not self.is_valid_email(email):
                 self.register_status_var.set("Correo inválido")
                 return
             if pwd != confirm:
@@ -405,7 +425,7 @@ class DinoRunner:
             if user in self.accounts:
                 self.register_status_var.set("Ese usuario ya existe")
                 return
-            if any(str(v.get("email", "")).lower() == email.lower() for v in self.accounts.values() if isinstance(v, dict)):
+            if self.find_account_by_email(email):
                 self.register_status_var.set("Ese correo ya está registrado")
                 return
             self.accounts[user] = {
@@ -428,30 +448,74 @@ class DinoRunner:
             return
         if action == "send_recovery":
             email = self.recover_email_var.get().strip()
-            if "@" not in email or "." not in email:
+            if not self.is_valid_email(email):
                 self.recover_status_var.set("Ingresa un correo electrónico válido")
                 return
-            exists = any(str(v.get("email", "")).lower() == email.lower() for v in self.accounts.values() if isinstance(v, dict))
-            if not exists:
+            if not self.find_account_by_email(email):
                 self.recover_status_var.set("Ese correo no está registrado")
                 return
-            self.recovery_code = str(random.randint(100000, 999999))
-            ok, msg = self.send_recovery_email(email, self.recovery_code)
+            self.recovery_code = self.generate_recovery_code(6)
+            self.recovery_verified_email = ""
+            ok, msg = self.send_recovery_code(email, self.recovery_code)
             self.recover_status_var.set(msg)
             return
         if action == "verify_recovery":
             if not self.recovery_code:
                 self.recover_status_var.set("Primero envía el código a tu correo")
                 return
+            current_email = self.recover_email_var.get().strip().lower()
             if self.recover_code_var.get().strip() == self.recovery_code:
-                self.recover_status_var.set("Código correcto. Ya puedes volver al login")
+                self.recovery_verified_email = current_email
+                self.recover_status_var.set("Código correcto. Ahora escribe tu nueva contraseña")
             else:
+                self.recovery_verified_email = ""
                 self.recover_status_var.set("Código incorrecto")
+            return
+        if action == "reset_password":
+            email = self.recover_email_var.get().strip().lower()
+            new_password = self.recover_new_pass_var.get()
+            confirm_password = self.recover_confirm_pass_var.get()
+
+            if not email or not new_password or not confirm_password:
+                self.recover_status_var.set("Completa correo y nueva contraseña")
+                return
+            if self.recovery_verified_email != email:
+                self.recover_status_var.set("Primero verifica el código de recuperación")
+                return
+            if new_password != confirm_password:
+                self.recover_status_var.set("Las contraseñas no coinciden")
+                return
+
+            target_user = self.find_account_by_email(email)
+            if not target_user:
+                self.recover_status_var.set("Ese correo no está registrado")
+                return
+
+            info = self.accounts[target_user]
+            if not isinstance(info, dict):
+                self.recover_status_var.set("Cuenta inválida")
+                return
+
+            info["password"] = new_password
+            self.accounts[target_user] = info
+            self.save_accounts()
+            self.login_var.set(target_user)
+            self.password_var.set("")
+            self.recover_status_var.set("Contraseña actualizada. Inicia sesión")
+            self.recover_code_var.set("")
+            self.recover_new_pass_var.set("")
+            self.recover_confirm_pass_var.set("")
+            self.recovery_code = ""
+            self.recovery_verified_email = ""
+            self.screen = "login"
             return
         if action == "back_login":
             self.screen = "login"
             self.recover_status_var.set("")
             self.recover_code_var.set("")
+            self.recover_new_pass_var.set("")
+            self.recover_confirm_pass_var.set("")
+            self.recovery_verified_email = ""
             return
         if action == "play":
             self.screen = "playing"
@@ -496,6 +560,7 @@ class DinoRunner:
             if skin and skin["owned"]:
                 self.equipped_skin = key
                 self.save_current_account()
+                return
 
     def spawn_obstacle(self) -> None:
         can_spawn_bird = self.score >= BIRD_SCORE_THRESHOLD
@@ -857,7 +922,7 @@ class DinoRunner:
     def draw_recover_screen(self) -> None:
         self.canvas.create_rectangle(0, 0, self.game_width, self.game_height, fill="#050a2b", width=0)
         card_w = min(760, self.game_width - 140)
-        card_h = 460
+        card_h = 620
         x1 = (self.game_width - card_w) / 2
         y1 = max(100, (self.game_height - card_h) / 2)
         x2 = x1 + card_w
@@ -865,18 +930,21 @@ class DinoRunner:
         self.canvas.create_rectangle(x1, y1, x2, y1 + card_h, fill="#0b1120", outline="#334155", width=3)
         cx = self.game_width / 2
         self.canvas.create_text(cx, y1 + 62, text="Recuperar contraseña", fill="#e2e8f0", font=("Segoe UI", 38, "bold"))
-        self.canvas.create_text(cx, y1 + 110, text="Ingresa tu correo y luego el código enviado", fill="#93c5fd", font=("Segoe UI", 15, "bold"))
+        self.canvas.create_text(cx, y1 + 110, text="Ingresa tu correo, verifica código y define nueva contraseña", fill="#93c5fd", font=("Segoe UI", 15, "bold"))
 
         self.canvas.create_text(cx, y1 + 198, text="Correo electrónico", fill="#cbd5e1", font=("Segoe UI", 16, "bold"))
         self.canvas.create_text(cx, y1 + 270, text="Código recibido", fill="#cbd5e1", font=("Segoe UI", 16, "bold"))
+        self.canvas.create_text(cx, y1 + 342, text="Nueva contraseña", fill="#cbd5e1", font=("Segoe UI", 16, "bold"))
+        self.canvas.create_text(cx, y1 + 414, text="Confirmar contraseña", fill="#cbd5e1", font=("Segoe UI", 16, "bold"))
 
         status = self.recover_status_var.get().strip()
         if status:
-            self.canvas.create_text(cx, y1 + 304, text=status, fill="#facc15", font=("Segoe UI", 13, "bold"))
+            self.canvas.create_text(cx, y1 + 452, text=status, fill="#facc15", font=("Segoe UI", 13, "bold"))
 
-        self.button(cx - 170, y1 + 326, 340, 46, "Enviar código", "send_recovery", "#22c55e")
-        self.button(cx - 170, y1 + 376, 340, 46, "Verificar código", "verify_recovery", "#38bdf8")
-        self.button(cx - 170, y1 + 426, 340, 36, "Volver al login", "back_login", "#a78bfa")
+        self.button(cx - 170, y1 + 480, 340, 42, "Enviar código", "send_recovery", "#22c55e")
+        self.button(cx - 170, y1 + 526, 340, 42, "Verificar código", "verify_recovery", "#38bdf8")
+        self.button(cx - 170, y1 + 572, 340, 42, "Guardar nueva contraseña", "reset_password", "#f59e0b")
+        self.button(cx - 170, y1 + 618, 340, 36, "Volver al login", "back_login", "#a78bfa")
 
     def draw_main_menu(self) -> None:
         self.canvas.create_rectangle(0, 0, self.game_width, self.game_height, fill="#0b1120", width=0)
@@ -886,7 +954,7 @@ class DinoRunner:
         cx = self.game_width / 2 - 130
         self.button(cx, self.game_height / 2 - 20, 260, 62, "Jugar", "play", "#22c55e")
         self.button(cx, self.game_height / 2 + 60, 260, 62, "Tienda", "open_shop", "#f59e0b")
-        self.button(cx, self.game_height / 2 + 140, 260, 62, "Sking", "open_skins", "#60a5fa")
+        self.button(cx, self.game_height / 2 + 140, 260, 62, "Skins", "open_skins", "#60a5fa")
         self.button(cx, self.game_height / 2 + 220, 260, 62, "Salir", "exit", "#ef4444")
 
     def draw_shop(self) -> None:
@@ -901,14 +969,18 @@ class DinoRunner:
         self.canvas.create_text(self.game_width / 4, 120, text="Lado izquierdo", fill="#d1d5db", font=("Segoe UI", 16, "bold"))
         self.canvas.create_text(self.game_width * 3 / 4, 120, text="Lado derecho", fill="#d1d5db", font=("Segoe UI", 16, "bold"))
 
-        # 2 skins a la izquierda
-        left_keys = ["default", "verdoso", "infernal"]
-        right_keys = ["cr7", "messi", "neymar"]
+        # Skins disponibles (solo las definidas en self.skins)
+        left_keys = ["default", "infernal"]
+        right_keys: list[str] = []
 
         self.draw_skin_cards(left_keys, start_x=70, start_y=150)
         self.draw_skin_cards(right_keys, start_x=self.game_width / 2 + 50, start_y=150)
 
         self.button(40, self.game_height - 90, 220, 52, "Volver al menú", "back_menu", "#a78bfa")
+
+    def draw_shop_screen(self) -> None:
+        # Alias para mantener compatibilidad con el nombre esperado por comentarios.
+        self.draw_shop()
 
     def draw_shop_logo(self, cx: float, cy: float, r: float) -> None:
         # Logo inspirado en cesta de Mercadona dentro de circulo verde
@@ -925,23 +997,8 @@ class DinoRunner:
         # Mini preview entre nombre y coste para facilitar compra
         if key == "infernal":
             self.draw_player_infernal(x + 8, y + 3)
-        elif key == "cr7":
-            self.draw_player_cr7(x + 8, y + 2)
-        elif key == "messi":
-            self.draw_player_messi(x + 8, y + 2)
-        elif key == "neymar":
-            self.draw_player_neymar(x + 8, y + 2)
         else:
-            skin = self.skins[key]
-            base = str(skin["base"])
-            dark = str(skin["dark"])
-            # Cabeza/cuerpo con patas para default y verdoso
-            self.canvas.create_rectangle(x + 14, y + 14, x + 48, y + 40, fill=base, outline=dark, width=2)
-            self.canvas.create_oval(x + 36, y + 18, x + 56, y + 36, fill=base, outline=dark, width=2)
-            self.canvas.create_rectangle(x + 20, y + 40, x + 27, y + 52, fill=base, outline=dark)
-            self.canvas.create_rectangle(x + 33, y + 40, x + 40, y + 52, fill=base, outline=dark)
-            # Ojo alineado con la posicion del infernal (zona baja-derecha de la cabeza)
-            self.canvas.create_oval(x + 49, y + 26, x + 53, y + 30, fill="#0f172a", outline="")
+            self.draw_player_default(x + 8, y + 3)
 
     def draw_skin_cards(self, keys: list[str], start_x: float, start_y: float) -> None:
         y = start_y
@@ -970,12 +1027,16 @@ class DinoRunner:
 
     def draw_skins_menu(self) -> None:
         self.canvas.create_rectangle(0, 0, self.game_width, self.game_height, fill="#0b1120", width=0)
-        self.canvas.create_text(self.game_width / 2, 70, text="Skings", fill="#e2e8f0", font=("Segoe UI", 40, "bold"))
+        self.canvas.create_text(self.game_width / 2, 70, text="Skins", fill="#e2e8f0", font=("Segoe UI", 40, "bold"))
         self.canvas.create_text(self.game_width / 2, 108, text="Aquí puedes equipar sin entrar a la tienda", fill="#93c5fd", font=("Segoe UI", 16, "bold"))
 
-        keys = ["default", "verdoso", "infernal", "cr7", "messi", "neymar"]
+        keys = ["default", "infernal"]
         self.draw_owned_skin_cards(keys, start_x=90, start_y=150)
         self.button(40, self.game_height - 90, 220, 52, "Volver al menú", "back_menu", "#a78bfa")
+
+    def draw_skins_screen(self) -> None:
+        # Alias para mantener compatibilidad con el nombre esperado por comentarios.
+        self.draw_skins_menu()
 
     def draw_owned_skin_cards(self, keys: list[str], start_x: float, start_y: float) -> None:
         columns = [start_x, start_x + 520]
@@ -1025,6 +1086,10 @@ class DinoRunner:
         self.button(self.game_width / 2 - 170, self.game_height / 2 - 20, 340, 64, "Jugar otra partida", "play_again", "#22c55e")
         self.button(self.game_width / 2 - 170, self.game_height / 2 + 70, 340, 64, "Volver al menú", "back_menu", "#a78bfa")
 
+    def draw_game_over(self) -> None:
+        # Alias para mantener compatibilidad con el nombre esperado por comentarios.
+        self.draw_game_over_menu()
+
     def draw_game(self) -> None:
         self.draw_dynamic_sky()
         self.draw_ground()
@@ -1049,15 +1114,49 @@ class DinoRunner:
                 trunk_x2 = x1 + w * 0.64
                 self.canvas.create_rectangle(trunk_x1, y1, trunk_x2, y2, fill=cactus_fill, outline=cactus_dark, width=2)
 
-                # Brazo izquierdo (hacia arriba)
-                left_arm_y = y1 + h * 0.40
-                self.canvas.create_rectangle(x1 + w * 0.14, left_arm_y, trunk_x1, left_arm_y + h * 0.16, fill=cactus_fill, outline=cactus_dark, width=2)
-                self.canvas.create_rectangle(x1 + w * 0.14, y1 + h * 0.14, x1 + w * 0.28, left_arm_y, fill=cactus_fill, outline=cactus_dark, width=2)
+                # Brazo izquierdo: segmento horizontal + segmento vertical
+                left_joint_y = y1 + h * 0.40
+                left_arm_h = max(4.0, h * 0.16)
+                self.canvas.create_rectangle(
+                    x1 + w * 0.14,
+                    left_joint_y,
+                    trunk_x1,
+                    left_joint_y + left_arm_h,
+                    fill=cactus_fill,
+                    outline=cactus_dark,
+                    width=2,
+                )
+                self.canvas.create_rectangle(
+                    x1 + w * 0.14,
+                    y1 + h * 0.14,
+                    x1 + w * 0.28,
+                    left_joint_y,
+                    fill=cactus_fill,
+                    outline=cactus_dark,
+                    width=2,
+                )
 
-                # Brazo derecho (mas alto)
-                right_arm_y = y1 + h * 0.30
-                self.canvas.create_rectangle(trunk_x2, right_arm_y, x1 + w * 0.88, right_arm_y + h * 0.16, fill=cactus_fill, outline=cactus_dark, width=2)
-                self.canvas.create_rectangle(x1 + w * 0.74, y1 + h * 0.05, x1 + w * 0.88, right_arm_y, fill=cactus_fill, outline=cactus_dark, width=2)
+                # Brazo derecho: segmento horizontal + segmento vertical (más alto)
+                right_joint_y = y1 + h * 0.30
+                right_arm_h = max(4.0, h * 0.16)
+                self.canvas.create_rectangle(
+                    trunk_x2,
+                    right_joint_y,
+                    x1 + w * 0.88,
+                    right_joint_y + right_arm_h,
+                    fill=cactus_fill,
+                    outline=cactus_dark,
+                    width=2,
+                )
+                self.canvas.create_rectangle(
+                    x1 + w * 0.74,
+                    y1 + h * 0.05,
+                    x1 + w * 0.88,
+                    right_joint_y,
+                    fill=cactus_fill,
+                    outline=cactus_dark,
+                    width=2,
+                )
 
     def update_hud_branding_visibility(self) -> None:
         show = self.screen == "shop"
@@ -1098,19 +1197,21 @@ class DinoRunner:
                 self.login_entry.focus_set()
         elif self.screen == "recover_password":
             card_w = min(760, self.game_width - 140)
-            card_h = 460
-            y1 = max(100, (self.game_height - card_h) / 2)
+            card_h = 500
+            y1 = max(70, (self.game_height - card_h) / 2 - 10)
             cx = self.game_width / 2
             entry_w = min(560, card_w - 120)
-            self.recover_email_entry.place(x=cx - entry_w / 2 + 2, y=y1 + 144, width=entry_w - 4, height=36)
-            self.recover_code_entry.place(x=cx - entry_w / 2 + 2, y=y1 + 216, width=entry_w - 4, height=36)
+            self.recover_email_entry.place(x=cx - entry_w / 2, y=y1 + 170, width=entry_w, height=38)
+            self.recover_code_entry.place(x=cx - entry_w / 2, y=y1 + 230, width=entry_w, height=38)
+            self.recover_new_pass_entry.place(x=cx - entry_w / 2, y=y1 + 290, width=entry_w, height=38)
+            self.recover_confirm_pass_entry.place(x=cx - entry_w / 2, y=y1 + 350, width=entry_w, height=38)
             self.login_entry.place_forget()
             self.password_entry.place_forget()
             self.register_user_entry.place_forget()
             self.register_email_entry.place_forget()
             self.register_pass_entry.place_forget()
             self.register_confirm_entry.place_forget()
-            if self.root.focus_get() not in {self.recover_email_entry, self.recover_code_entry}:
+            if self.root.focus_get() not in {self.recover_email_entry, self.recover_code_entry, self.recover_new_pass_entry, self.recover_confirm_pass_entry}:
                 self.recover_email_entry.focus_set()
         elif self.screen == "register_account":
             card_w = min(760, self.game_width - 140)
@@ -1126,6 +1227,8 @@ class DinoRunner:
             self.password_entry.place_forget()
             self.recover_email_entry.place_forget()
             self.recover_code_entry.place_forget()
+            self.recover_new_pass_entry.place_forget()
+            self.recover_confirm_pass_entry.place_forget()
             if self.root.focus_get() not in {self.register_user_entry, self.register_email_entry, self.register_pass_entry, self.register_confirm_entry}:
                 self.register_user_entry.focus_set()
         else:
@@ -1133,6 +1236,8 @@ class DinoRunner:
             self.password_entry.place_forget()
             self.recover_email_entry.place_forget()
             self.recover_code_entry.place_forget()
+            self.recover_new_pass_entry.place_forget()
+            self.recover_confirm_pass_entry.place_forget()
             self.register_user_entry.place_forget()
             self.register_email_entry.place_forget()
             self.register_pass_entry.place_forget()

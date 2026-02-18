@@ -35,7 +35,7 @@ Precios:
 - **Skin predeterminada** (gratis)
 - **Dragon infernal** (50 Emilianos)
 - **Verdoso** (20 Emilianos)
-- **Skin Cristiano Ronaldo** (80 Emilianos)
+- **Skin Cristiano Ronaldo** (100 Emilianos)
 
 ## Controles (en partida)
 - `Espacio` o `↑`: Saltar
@@ -49,3 +49,8 @@ Precios:
 - Las monedas **Emilianos** vuelven a aparecer en varias alturas, con algo menos de probabilidad, y sí se desplazan para poder recogerlas.
 - Los textos de branding (`Modern Dinosaur Game` y `MERCADONA`) solo aparecen cuando estás en la tienda.
 - El texto de ayuda solo aparece en menú principal y partida (no en tienda).
+
+
+## Recuperar contraseña
+- Desde el login, usa **Recuperar contraseña**.
+- Flujo: enviar código al correo → verificar código → definir nueva contraseña.
